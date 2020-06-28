@@ -37,17 +37,12 @@ struct Replica {
     jobs_to_retry : Arc<Mutex<VecDeque<mystorers::Job>>>,
     cluster_membership : Arc<Mutex<Vec<ID>>>,
     has_operation_started : bool,
-    my_id : ID,
-    timer_thr : thread::JoinHandle<()>
+    my_id : ID
 }
 
 impl Replica {
-    fn timer(self) {
-    }
-
     fn new(port : u32) -> Self {
-
-        let mut replica = Replica {
+        Replica {
             state : Arc::new(Mutex::new(ReplicaState::FOLLOWER)),
             current_term : Arc::new(Mutex::new(0)),
             commit_index : Arc::new(Mutex::new(0)),
@@ -55,7 +50,7 @@ impl Replica {
             timeout : Arc::new(0),
             voted_for : Arc::new(Mutex::new(ID::new(None, None))),
             leader : Arc::new(Mutex::new(ID::new(None, None))),
-            current_request_being_serviced : Arc::new(Mutex::new(u32::max_value())),
+            current_request_being_serviced : Arc::new(Mutex::new(0)), //Arc::new(Mutex::new(u32::max_value())),
             has_operation_started : false,
             cluster_membership : Arc::new(Mutex::new(Vec::new())),
             noop_index : Arc::new(Mutex::new(0)),
@@ -66,16 +61,26 @@ impl Replica {
             state_machine : Arc::new(Mutex::new(HashMap::new())),
             time_left : Arc::new(Mutex::new(0)),
             my_id : Default::default(),
-            timer_thr : thread::spawn(|| {})
-        };
-
-        //replica.timer_thr = thread::spawn(|| replica.timer());
-
-        replica
+        }
     }
 }
 
-impl ReplicaServiceSyncHandler for Replica {
+struct Container {
+    replica : Arc<Mutex<Replica>>
+}
+
+impl Container {
+    fn new(port: u32) -> Self {
+        Container {
+            replica : Arc::new(Mutex::new(Replica::new(port)))
+        }
+    }
+
+    fn timer() {
+    }
+}
+
+impl ReplicaServiceSyncHandler for Container {
     fn handle_request_vote(&self, term: i32, candidate_i_d: ID, last_log_index: i32, last_log_term: i32) -> thrift::Result<Ballot> {
         Ok(Ballot::default())
     }
@@ -102,6 +107,25 @@ impl ReplicaServiceSyncHandler for Replica {
     }
 
     fn handle_start(&self) -> thrift::Result<()> {
+        println!("in start");
+        //let heartbeat_copy = Arc::clone(&self.replica);
+/*
+        thread::spawn(move || {
+            loop {
+                (*heartbeat_copy).lock().unwrap();
+                println!("heartbeat...")
+            }
+        });
+*/
+        //let timer_copy = Arc::clone(&self.replica);
+/*
+        thread::spawn(move || {
+            loop {
+                (*timer_copy).lock().unwrap();
+                println!("timer...")
+            }
+        });
+*/
         Ok(())
     }
 
@@ -114,7 +138,7 @@ impl ReplicaServiceSyncHandler for Replica {
     }
 }   
 
-fn run() -> thrift::Result<()> {
+fn run() -> thrift::Result<()> {    
 
     let listen_address = format!("127.0.0.1:{}", 5000);
 
@@ -126,16 +150,9 @@ fn run() -> thrift::Result<()> {
     let o_tran_fact = TFramedWriteTransportFactory::new();
     let o_prot_fact = TCompactOutputProtocolFactory::new();
 
-    let replica = Arc::new(Replica::new(5000));
+    let container = Container::new(5000);
 
-    let underlying_object = match Arc::try_unwrap(replica) {
-        Ok(obj) => obj,
-        Err(err) => panic!("Unable to grab underlying replica from rc pointer")
-    };
-
-    let timer_thr = thread::spawn(|| underlying_object.timer());
-
-    let processor = ReplicaServiceSyncProcessor::new(underlying_object);
+    let processor = ReplicaServiceSyncProcessor::new(container);
 
     let mut server = TServer::new(
         i_tran_fact,
@@ -146,6 +163,7 @@ fn run() -> thrift::Result<()> {
         10,
     );
 
+    println!("before server...");
     server.listen(&listen_address)
 }
 
